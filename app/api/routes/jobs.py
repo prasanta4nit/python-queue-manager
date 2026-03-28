@@ -12,7 +12,9 @@ from app.schemas.job import (
     JobListResponse,
     JobProgressUpdate,
     JobResponse,
+    SalesforceJobRequest,
 )
+from app.services.cmd_registry import get_job_type, get_worker_script, list_registered_cmds
 from app.services.job_service import JobService
 from app.services.sqs_service import SQSService
 
@@ -21,13 +23,74 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 _sqs = SQSService()
 
 
+# ── Salesforce trigger ─────────────────────────────────────────────────────────
+
+@router.post("/trigger", response_model=JobResponse, status_code=201)
+async def trigger_salesforce_job(
+    request: SalesforceJobRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Primary entry point for Salesforce.
+
+    Salesforce sends its standard orchestrator payload; PyQM extracts the `cmd`
+    from `externalOrchestrator.internalCommand.cmd`, looks up the matching Python
+    module in the CMD registry, and enqueues the job.
+
+    The full payload is forwarded to the worker script via stdin so every worker
+    has access to orchestratorRequest, callbackURL, rootRecordId, etc.
+    """
+    cmd = request.externalOrchestrator.internalCommand.cmd
+    worker_script = get_worker_script(cmd)
+
+    if not worker_script:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown cmd: '{cmd}'. "
+                f"Registered cmds: {list_registered_cmds()}. "
+                f"Add it to app/services/cmd_registry.py"
+            ),
+        )
+
+    org_id     = request.externalOrchestrator.orgId or "unknown"
+    priority   = request.externalOrchestrator.priority or "low"
+    job_type   = get_job_type(cmd, priority)
+
+    svc = JobService(db)
+    job = await svc.create_job(
+        JobCreateRequest(
+            customer_name=org_id,
+            user_name=request.externalOrchestrator.sId or "salesforce",
+            worker_script=worker_script,
+            job_type=job_type,
+            chunk_size=request.chunkSize,
+            parameters=request.model_dump(),   # full SF payload forwarded to worker
+        )
+    )
+
+    await _sqs.send_job(
+        str(job.job_id),
+        {
+            "job_type":      job.job_type,
+            "customer_name": job.customer_name,
+            "user_name":     job.user_name,
+            "worker_script": job.worker_script,
+            "chunk_size":    job.chunk_size,
+            "cmd":           cmd,
+            "parameters":    json.loads(job.parameters) if job.parameters else {},
+        },
+    )
+    return job
+
+
+# ── Generic job submission ─────────────────────────────────────────────────────
+
 @router.post("/", response_model=JobResponse, status_code=201)
 async def create_job(request: JobCreateRequest, db: AsyncSession = Depends(get_db)):
     """
-    Submit a new job.
-
-    Stores the job record in RDS (status=QUEUED) then pushes a message to SQS.
-    The WorkerManager picks it up and executes the worker script on this EC2 instance.
+    Submit a job directly (non-Salesforce callers / testing).
+    Specify worker_script explicitly instead of using cmd routing.
     """
     svc = JobService(db)
     job = await svc.create_job(request)
@@ -35,16 +98,18 @@ async def create_job(request: JobCreateRequest, db: AsyncSession = Depends(get_d
     await _sqs.send_job(
         str(job.job_id),
         {
-            "job_type": job.job_type,
+            "job_type":      job.job_type,
             "customer_name": job.customer_name,
-            "user_name": job.user_name,
+            "user_name":     job.user_name,
             "worker_script": job.worker_script,
-            "chunk_size": job.chunk_size,
-            "parameters": json.loads(job.parameters) if job.parameters else {},
+            "chunk_size":    job.chunk_size,
+            "parameters":    json.loads(job.parameters) if job.parameters else {},
         },
     )
     return job
 
+
+# ── Query ──────────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=JobListResponse)
 async def list_jobs(
@@ -81,12 +146,7 @@ async def update_job_progress(
     update: JobProgressUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Update job progress.
-
-    Called by worker scripts during execution to report processed_records count.
-    Workers should POST here periodically for long-running jobs.
-    """
+    """Update job progress — called by worker scripts during execution."""
     svc = JobService(db)
     job = await svc.get_job(job_id)
     if not job:
