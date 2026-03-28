@@ -1,0 +1,11 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+sqlalchemy[asyncio]>=2.0.0
+aiosqlite>=0.20.0       # local testing with SQLite
+aiomysql>=0.2.0        # production with AWS RDS MySQL
+alembic>=1.13.0
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+aioboto3>=13.0.0
+python-dotenv>=1.0.0
+httpx>=0.27.0
