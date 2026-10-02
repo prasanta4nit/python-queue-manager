@@ -1,0 +1,436 @@
+{
+  "info": {
+    "name": "PyQM — Python Queue Manager",
+    "description": "FastAPI-based async job execution service for Salesforce workloads.\n\nBase URL is stored in the {{base_url}} variable (default: http://localhost:8000).\nChange the environment variable to point to your EC2 instance in production.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "job_id",
+      "value": "replace-with-actual-job-id",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Lightweight health check. Returns active/max worker counts.\nUsed by EC2 load balancer and Salesforce ping."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"healthy\",\n  \"service\": \"PyQM\",\n  \"version\": \"1.0.0\",\n  \"workers\": {\n    \"active\": 2,\n    \"max\": 5,\n    \"available\": 3\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "Submit Job (Short)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.job_id) {",
+                  "  pm.collectionVariables.set('job_id', res.job_id);",
+                  "  console.log('job_id saved:', res.job_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_name\": \"ACME Corp\",\n  \"user_name\": \"sf-admin\",\n  \"worker_script\": \"example_short_worker.py\",\n  \"job_type\": \"short\",\n  \"chunk_size\": 100,\n  \"parameters\": {\n    \"total_records\": 500\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Submit a short-running job (expected < 5 minutes).\nThe job_id from the response is automatically saved to the {{job_id}} collection variable."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"QUEUED\",\n  \"customer_name\": \"ACME Corp\",\n  \"user_name\": \"sf-admin\",\n  \"job_type\": \"short\",\n  \"worker_script\": \"example_short_worker.py\",\n  \"chunk_size\": 100,\n  \"processed_records\": 0,\n  \"retry_count\": 0,\n  \"start_datetime\": null,\n  \"error_message\": null,\n  \"created_at\": \"2026-03-28T10:00:00Z\",\n  \"updated_at\": \"2026-03-28T10:00:00Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Submit Job (Long)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.job_id) {",
+                  "  pm.collectionVariables.set('job_id', res.job_id);",
+                  "  console.log('job_id saved:', res.job_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_name\": \"BigCorp\",\n  \"user_name\": \"sf-integration\",\n  \"worker_script\": \"example_long_worker.py\",\n  \"job_type\": \"long\",\n  \"chunk_size\": 1000,\n  \"parameters\": {\n    \"total_records\": 50000\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Submit a long-running job (can run up to 1 hour).\nPyQM will send SQS visibility heartbeats to prevent re-queuing."
+          }
+        },
+        {
+          "name": "Submit Excel → Salesforce Upsert Job",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.job_id) {",
+                  "  pm.collectionVariables.set('job_id', res.job_id);",
+                  "  console.log('job_id saved:', res.job_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_name\": \"ACME Corp\",\n  \"user_name\": \"sf-admin\",\n  \"worker_script\": \"excel_sf_upsert_worker.py\",\n  \"job_type\": \"long\",\n  \"chunk_size\": 200,\n  \"parameters\": {\n    \"file_path\": \"C:/data/accounts.xlsx\",\n    \"sf_object\": \"Contact\",\n    \"external_id\": \"External_Id__c\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"]
+            },
+            "description": "Submit an Excel → Salesforce bulk upsert job.\nUpdate file_path, sf_object, and external_id to match your data."
+          }
+        },
+        {
+          "name": "Get Job Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs/{{job_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs", "{{job_id}}"]
+            },
+            "description": "Get the current status of a single job by its UUID.\nPoll this endpoint to track progress (processed_records, status)."
+          },
+          "response": [
+            {
+              "name": "200 OK — PROCESSING",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"PROCESSING\",\n  \"customer_name\": \"ACME Corp\",\n  \"processed_records\": 300,\n  \"retry_count\": 0,\n  \"start_datetime\": \"2026-03-28T10:00:05Z\",\n  \"error_message\": null\n}"
+            },
+            {
+              "name": "200 OK — FINISHED",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"FINISHED\",\n  \"processed_records\": 500,\n  \"retry_count\": 0,\n  \"error_message\": null\n}"
+            },
+            {
+              "name": "200 OK — FAILED",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"FAILED\",\n  \"processed_records\": 100,\n  \"retry_count\": 3,\n  \"error_message\": \"Connection timeout to Salesforce API\"\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{\n  \"detail\": \"Job not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List All Jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs?limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "Filter by status: QUEUED | PROCESSING | FINISHED | AWAITING_RETRY | FAILED | CANCELLED",
+                  "disabled": true
+                },
+                {
+                  "key": "customer_name",
+                  "value": "",
+                  "description": "Filter by customer name",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Max results (1–500)"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset"
+                }
+              ]
+            },
+            "description": "List all jobs with optional filters.\nEnable query params as needed."
+          }
+        },
+        {
+          "name": "List Jobs — PROCESSING only",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs?status=PROCESSING",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "PROCESSING"
+                }
+              ]
+            },
+            "description": "List only currently running jobs."
+          }
+        },
+        {
+          "name": "List Jobs — FAILED only",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs?status=FAILED",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "FAILED"
+                }
+              ]
+            },
+            "description": "List permanently failed jobs (retry exhausted)."
+          }
+        },
+        {
+          "name": "List Jobs — By Customer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs?customer_name=ACME Corp",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs"],
+              "query": [
+                {
+                  "key": "customer_name",
+                  "value": "ACME Corp"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Job Progress",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"processed_records\": 250\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/jobs/{{job_id}}/progress",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "jobs", "{{job_id}}", "progress"]
+            },
+            "description": "Called by worker scripts during execution to report progress.\nWorkers can also include an error_message field."
+          },
+          "response": [
+            {
+              "name": "Example with error_message",
+              "request": {
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"processed_records\": 150,\n  \"error_message\": \"Row 151 has invalid email format — skipped\"\n}"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Worker Pool Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/workers/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "workers", "status"]
+            },
+            "description": "Returns live worker pool status on this EC2 instance:\n- active_workers: jobs currently executing\n- max_workers: configured MAX_CONCURRENT_WORKERS\n- available_slots: free slots\n- running_jobs: list of active job IDs"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"active_workers\": 2,\n  \"max_workers\": 5,\n  \"available_slots\": 3,\n  \"running_jobs\": [\n    \"550e8400-e29b-41d4-a716-446655440000\",\n    \"660e8400-e29b-41d4-a716-446655440001\"\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Cancel Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/jobs/{{job_id}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "jobs", "{{job_id}}", "cancel"]
+            },
+            "description": "Cancel a QUEUED job. Only works if the job has not started yet.\nReturns 409 if the job is already PROCESSING or in another non-QUEUED state."
+          },
+          "response": [
+            {
+              "name": "200 OK — Cancelled",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"CANCELLED\"\n}"
+            },
+            {
+              "name": "409 Conflict — Already Processing",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{\n  \"detail\": \"Cannot cancel job in 'PROCESSING' state — only QUEUED jobs can be cancelled.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Force Retry Job",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/jobs/{{job_id}}/retry",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "admin", "jobs", "{{job_id}}", "retry"]
+            },
+            "description": "Force-retry a FAILED or AWAITING_RETRY job.\nResets retry_count to 0 and re-queues to SQS immediately.\nUseful after fixing a transient infrastructure issue."
+          },
+          "response": [
+            {
+              "name": "200 OK — Re-queued",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"status\": \"QUEUED\",\n  \"retry_count\": 0\n}"
+            },
+            {
+              "name": "409 Conflict — Not Retryable",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{\n  \"detail\": \"Can only retry FAILED or AWAITING_RETRY jobs. Current status: FINISHED\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
